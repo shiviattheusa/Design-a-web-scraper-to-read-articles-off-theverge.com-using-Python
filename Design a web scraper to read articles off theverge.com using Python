@@ -1,0 +1,76 @@
+import requests
+from bs4 import BeautifulSoup
+import csv
+import sqlite3
+from datetime import datetime
+
+class Article:
+    def __init__(self, headline, url, author, date):
+        self.headline = headline
+        self.url = url
+        self.author = author
+        self.date = date
+
+class Scraper:
+    def __init__(self, url, headers):
+        self.url = url
+        self.headers = headers
+    
+    def scrape(self):
+        response = requests.get(self.url, headers=self.headers)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        articles = soup.find_all('article')
+        return articles
+
+class Writer:
+    def __init__(self, filename):
+        self.filename = filename
+    
+    def write_csv(self, articles):
+        with open(self.filename, 'a', newline='') as f:
+            writer = csv.writer(f)
+            for i, article in enumerate(articles):
+                writer.writerow([i+1, article.url, article.headline, article.author, article.date])
+    
+    def write_database(self, articles):
+        date = datetime.now().strftime("%d%m%Y")
+        db_file = f"{date}_verge.db"
+        conn = sqlite3.connect(db_file)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS articles
+                     (id INTEGER PRIMARY KEY,
+                     url TEXT NOT NULL,
+                     headline TEXT NOT NULL,
+                     author TEXT NOT NULL,
+                     date TEXT NOT NULL);''')
+        for i, article in enumerate(articles):
+            c.execute("INSERT OR IGNORE INTO articles (id, url, headline, author, date) VALUES (?, ?, ?, ?, ?)",
+                      (i+1, article.url, article.headline, article.author, article.date))
+        conn.commit()
+        conn.close()
+
+class VergeScraper:
+    def __init__(self, url, headers):
+        self.url = url
+        self.headers = headers
+        self.scraper = Scraper(self.url, self.headers)
+        self.writer = Writer('verge.csv')
+    
+    def run(self):
+        articles = self.scraper.scrape()
+        article_objs = []
+        for article in articles:
+            headline = article.find('h2', class_='c-entry-box--compact__title').text.strip()
+            url = article.find('a')['href']
+            author = article.find('span', class_='c-byline__item').text.strip()
+            date = article.find('time')['datetime']
+            article_obj = Article(headline, url, author, date)
+            article_objs.append(article_obj)
+        self.writer.write_csv(article_objs)
+        self.writer.write_database(article_objs)
+
+if __name__ == '__main__':
+    url = 'https://www.theverge.com/'
+    headers = {'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'}
+    scraper = VergeScraper(url, headers)
+    scraper.run()
